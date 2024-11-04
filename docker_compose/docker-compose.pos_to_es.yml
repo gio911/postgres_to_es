@@ -1,0 +1,91 @@
+version: '3'
+services:
+  django:
+    build: ./simple_project/app
+    container_name: django_app
+    env_file:
+      - ./simple_project/app/.env
+    volumes:
+      - ./simple_project/app/static:/var/www/static
+      - ./simple_project/app:/opt/app
+    depends_on:
+      - theatre-db
+    expose: 
+      - 8000
+    networks:
+      - movie_network
+
+  theatre-db:
+    image: postgres:16
+    environment: 
+      POSTGRES_DB: theatre
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secret
+    container_name: theatre-db
+    ports:
+      - "5433:5432"
+    env_file:
+      - ./simple_project/app/.env
+    volumes:
+      - ./simple_project/theatre-db/init/:/docker-entrypoint-initdb.d
+      - $HOME/postgresql/theatre-db_data:/var/lib/postgresql/theatre-db_data    
+    networks:
+      - movie_network
+
+
+  nginx:
+    image: nginx:latest
+    volumes:
+      - ./simple_project/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./simple_project/configs:/etc/nginx/conf.d:ro
+      - ./simple_project/app/static:/var/www/static
+    container_name: nginx
+    depends_on:
+      - theatre-db
+    ports:
+      - "80:80"
+    networks:
+      - movie_network
+
+  swagger-ui:
+    image: swaggerapi/swagger-ui 
+    container_name: swagger
+    volumes:
+      - ./simple_project/swagger/openapi.yaml:/swagger.yaml
+    ports:
+      - "8081:8080"
+    environment:
+      SWAGGER_JSON: /swagger.yaml 
+    networks:
+      - movie_network
+
+  
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.15.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false 
+      - xpack.security.http.ssl.enabled=false  
+    ports:
+      - "9200:9200"
+    networks:
+      - movie_network
+  
+  etl:
+    build:
+      context: ../etl
+    environment:
+      POSTGRES_DSN: "postgres://postgres:secret@theatre-db:5432/theatre"
+      ES_HOST: "http://elasticsearch:9200"
+    depends_on:
+      - theatre-db
+      - elasticsearch
+    volumes:
+      - ../etl:/opt/etl
+    networks:
+      - movie_network
+
+
+networks:
+  movie_network:
+    driver: bridge
